@@ -28,7 +28,7 @@ import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-mana
 import { Breakpoint, DebugStackFrameDTO, DebugThreadDTO, WorkspaceFolder } from '../../../common/plugin-api-rpc-model';
 import { BreakpointManager, BreakpointsChangeEvent } from '@theia/debug/lib/browser/breakpoint/breakpoint-manager';
 import { URI as Uri } from '@theia/core/shared/vscode-uri';
-import { SourceBreakpoint, FunctionBreakpoint, BaseBreakpoint } from '@theia/debug/lib/browser/breakpoint/breakpoint-marker';
+import { SourceBreakpoint, FunctionBreakpoint, BaseBreakpoint, DataBreakpoint } from '@theia/debug/lib/browser/breakpoint/breakpoint-marker';
 import { DebugConfiguration, DebugSessionOptions } from '@theia/debug/lib/common/debug-configuration';
 import { DebuggerDescription } from '@theia/debug/lib/common/debug-service';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -88,7 +88,7 @@ export class DebugMainImpl implements DebugMain, Disposable {
         this.sessionContributionRegistrator = container.get(PluginDebugSessionContributionRegistry);
         this.pluginService = container.get(HostedPluginSupport);
 
-        const fireDidChangeBreakpoints = ({ added, removed, changed }: BreakpointsChangeEvent<SourceBreakpoint | FunctionBreakpoint>) => {
+        const fireDidChangeBreakpoints = ({ added, removed, changed }: BreakpointsChangeEvent<SourceBreakpoint | FunctionBreakpoint | DataBreakpoint>) => {
             this.debugExt.$breakpointsDidChange(
                 this.toTheiaPluginApiBreakpoints(added),
                 removed.map(b => b.id),
@@ -97,10 +97,12 @@ export class DebugMainImpl implements DebugMain, Disposable {
         };
         this.debugExt.$breakpointsDidChange(this.toTheiaPluginApiBreakpoints(this.breakpointsManager.getBreakpoints().map(bp => bp.origin)), [], []);
         this.debugExt.$breakpointsDidChange(this.toTheiaPluginApiBreakpoints(this.breakpointsManager.getFunctionBreakpoints().map(bp => bp.origin)), [], []);
+        this.debugExt.$breakpointsDidChange(this.toTheiaPluginApiBreakpoints(this.breakpointsManager.getDataBreakpoints().map(bp => bp.origin)), [], []);
 
         this.toDispose.pushAll([
             this.breakpointsManager.onDidChangeBreakpoints(e => fireDidChangeBreakpoints(eventToOrigins(e))),
             this.breakpointsManager.onDidChangeFunctionBreakpoints(e => fireDidChangeBreakpoints(eventToOrigins(e))),
+            this.breakpointsManager.onDidChangeDataBreakpoints(e => fireDidChangeBreakpoints(eventToOrigins(e))),
             this.sessionManager.onDidCreateDebugSession(debugSession => this.debugExt.$sessionDidCreate(debugSession.id)),
             this.sessionManager.onDidStartDebugSession(debugSession => this.debugExt.$sessionDidStart(debugSession.id)),
             this.sessionManager.onDidDestroyDebugSession(debugSession => this.debugExt.$sessionDidDestroy(debugSession.id)),
@@ -308,11 +310,11 @@ export class DebugMainImpl implements DebugMain, Disposable {
         } : undefined;
     }
 
-    private toTheiaPluginApiBreakpoints(breakpoints: (SourceBreakpoint | FunctionBreakpoint)[]): Breakpoint[] {
+    private toTheiaPluginApiBreakpoints(breakpoints: (SourceBreakpoint | FunctionBreakpoint | DataBreakpoint)[]): Breakpoint[] {
         return breakpoints.map(b => this.toTheiaPluginApiBreakpoint(b));
     }
 
-    private toTheiaPluginApiBreakpoint(breakpoint: SourceBreakpoint | FunctionBreakpoint): Breakpoint {
+    private toTheiaPluginApiBreakpoint(breakpoint: SourceBreakpoint | FunctionBreakpoint | DataBreakpoint): Breakpoint {
         if ('uri' in breakpoint) {
             const raw = breakpoint.raw;
             return {
@@ -332,10 +334,21 @@ export class DebugMainImpl implements DebugMain, Disposable {
                 }
             };
         }
-        return {
-            id: breakpoint.id,
-            enabled: breakpoint.enabled,
-            functionName: breakpoint.raw.name
-        };
+        if (breakpoint && Object(breakpoint.raw).hasOwnProperty('dataId')) {
+            return {
+                id: breakpoint.id,
+                enabled: breakpoint.enabled,
+                // @ts-ignore
+                functionName: breakpoint.raw.dataId
+            };
+        } else {
+            return {
+                id: breakpoint.id,
+                enabled: breakpoint.enabled,
+                // @ts-ignore
+                functionName: breakpoint.raw.name
+            };
+        }
+
     }
 }
