@@ -27,5 +27,9 @@
       "DOM.AsyncIterable"
     ],
     "sourceMap": true
-  }
+  },
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
 }
