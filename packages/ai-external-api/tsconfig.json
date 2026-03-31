@@ -21,5 +21,9 @@
     {
       "path": "../workspace"
     }
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts"
   ]
 }
