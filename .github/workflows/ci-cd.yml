@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - master
-      - feature-axio-one
+      - feature-axio-one**
 
     paths-ignore:
       - '**/*.md'
