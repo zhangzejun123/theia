@@ -5,7 +5,6 @@ on:
     branches:
       - master
       - feature-axio-one**
-
     paths-ignore:
       - '**/*.md'
       - 'doc/**'
@@ -20,22 +19,44 @@ on:
       - 'logo/**'
 
 jobs:
-
   build:
     name: Build and Test (${{ matrix.os }}, node-${{ matrix.node }})
 
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, ubuntu-22.04]
-        node: [22.x]
-        # os: [windows-2022, ubuntu-22.04, macos-14]
-        # node: [20.x, 22.x]
+        include:
+          - os: windows-2022
+            node: "22.x"
+          - os: ubuntu-22.04
+            node: "22.x"
+            container: "ubuntu:20.04"
 
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     timeout-minutes: 60
 
     steps:
+      - name: Install base tools (Linux container)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          TZ: UTC
+        run: |
+          apt-get update -y
+          apt-get install -y software-properties-common
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update -y
+          apt-get install -y curl git python3 python3-pip p7zip-full build-essential \
+            libsecret-1-dev libx11-dev libxkbfile-dev rpm fakeroot \
+            libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
+            gcc-11 g++-11
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
+          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
+          git config --global --add safe.directory '*'
+
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -45,24 +66,31 @@ jobs:
           node-version: ${{ matrix.node }}
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Enable corepack (Linux container)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: corepack enable
+
       - name: Use Python 3.13
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.13'
-      
+
       - name: Build
         shell: bash
-        run: | # npm run build
+        run: |
+          # npm run build
           npm ci
           npm run compile
-          npm run build:electron 
+          npm run build:electron
           git status
           ./scripts/check_git_status.sh
         env:
           NODE_OPTIONS: --max_old_space_size=4096
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # https://github.com/microsoft/vscode-ripgrep/issues/9
-
-      # === 简化后的压缩和上传步骤 ===
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm_config_python: ${{ runner.os == 'Linux' && '/usr/bin/python3' || '' }}
+          PYTHON: ${{ runner.os == 'Linux' && '/usr/bin/python3' || '' }}
+          NODE_GYP_FORCE_PYTHON: ${{ runner.os == 'Linux' && '/usr/bin/python3' || '' }}
 
       - name: Prepare @theia artifact (resolve symlinks)
         shell: bash
@@ -71,7 +99,7 @@ jobs:
           mkdir -p artifact-theia
           cp -rL node_modules/@theia/* artifact-theia/
 
-      - name: Upload @theia artifact 
+      - name: Upload @theia artifact
         uses: actions/upload-artifact@v4
         with:
           name: '@theia-${{ runner.os }}-node${{ matrix.node }}'
