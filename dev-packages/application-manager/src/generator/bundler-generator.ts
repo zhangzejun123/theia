@@ -184,7 +184,15 @@ module.exports = [{
         rules: [
             {
                 test: /\\.css$/,
+                exclude: /\\.useable\\.css$/,
                 use: ['style-loader', 'css-loader']
+            },
+            {
+                test: /\\.useable\\.css$/,
+                use: [
+                    { loader: 'style-loader', options: { injectType: 'lazySingletonStyleTag', esModule: false } },
+                    'css-loader'
+                ]
             },
             {
                 test: /\\.(ttf|eot|svg)(\\?v=\\d+\\.\\d+\\.\\d+)?$/,
