@@ -45,6 +45,7 @@ jobs:
           TZ: UTC
         run: |
           apt-get update -y
+          apt-get install -y unzip
           apt-get install -y software-properties-common
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update -y

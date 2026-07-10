@@ -104,8 +104,8 @@ const { mode, watch, staticCompression } = yargs(hideBin(process.argv)).option('
     default: false
 }).option('static-compression', {
     description: ${this.ifElectron(
-        "'Controls whether to emit gzipped copies of the frontend assets. Disabled by default for Electron applications.'",
-        "'Controls whether to emit gzipped copies of the frontend assets. Enabled by default in production mode.'")},
+            "'Controls whether to emit gzipped copies of the frontend assets. Disabled by default for Electron applications.'",
+            "'Controls whether to emit gzipped copies of the frontend assets. Enabled by default in production mode.'")},
     type: 'boolean'
 }).argv;
 
@@ -113,10 +113,10 @@ const production = mode === 'production';
 const sourcemap = production ? false : 'linked';
 const minify = production;
 ${this.ifElectron(
-        `// Electron loads the frontend from the local backend over loopback, where gzip saves nothing
+                `// Electron loads the frontend from the local backend over loopback, where gzip saves nothing
 // while the compressed copies still add to the size of the packaged application.
 const compression = staticCompression ?? false;`,
-        `// Compressing on every rebuild would slow down watch mode, so this only pays off for production builds.
+                `// Compressing on every rebuild would slow down watch mode, so this only pays off for production builds.
 const compression = staticCompression ?? production;`)}
 
 export { mode, watch, sourcemap, minify, compression };
