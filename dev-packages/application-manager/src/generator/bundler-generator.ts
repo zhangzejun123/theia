@@ -442,7 +442,7 @@ ${this.ifBrowserOnly('module.exports = configs;', `module.exports = [
 const path = require('path');
 const yargs = require('yargs');
 const webpack = require('webpack');
-const TerserPlugin = require('terser-webpack-plugin');
+const TerserPlugin = require('minimizer-webpack-plugin');
 const { NativeWebpackPlugin, MonacoWebpackPlugin } = require('@theia/bundle-plugin');
 
 const { mode } = yargs.option('mode', {
