@@ -56,6 +56,66 @@ export const PLUGIN_VIEW_FACTORY_ID = 'plugin-view';
 export const PLUGIN_VIEW_CONTAINER_FACTORY_ID = 'plugin-view-container';
 export const PLUGIN_VIEW_DATA_FACTORY_ID = 'plugin-view-data';
 
+/**
+ * AXIO FIX: 插件视图容器「落区覆盖表」(容器 id → 目标 area)。
+ *
+ * 为什么需要:同一个 vsix 要同时装 VSCode 和本 IDE,`contributes.viewsContainers` 是两边共享的静态清单,
+ * 而两边对 location 键的理解不同 ——
+ *   - VSCode 只认 activitybar / panel(1.106 起还有 secondarySidebar);写成 Theia 私有的 auxiliarybar
+ *     会被清单校验判为非法属性并丢弃 ⇒ 容器不注册、视图被兜底塞进"资源管理器"。
+ *   - Theia 的 scanner 有一张别名表(scanner-theia.ts 的 VIEW_CONTAINER_LOCATION_ALIASES):
+ *     activitybar→left / panel→bottom / secondarySidebar→right / auxiliarybar→right。
+ * 于是插件的 axio 包/组件/生成器管理器只能声明成 activitybar(VSCode 合法),在 Theia 里就会被算成 left。
+ * 本表把它们纠正回右侧 dock(产品要求这三个管理器停在右栏),从而**不需要**在共享清单里使用宿主私有键。
+ *
+ * ★ 注意:initViewContainer 的持久化恢复归位必须走同一个取值函数 —— 否则那边会按声明 location(left)
+ *   把容器又拉回左栏,与本表打架。
+ */
+const PLUGIN_VIEW_CONTAINER_AREA_OVERRIDES: Record<string, ApplicationShell.Area> = {
+    'workbench.view.extension.axio-packages': 'right',
+    'workbench.view.extension.axio-components': 'right',
+    'workbench.view.extension.axio-generators': 'right'
+};
+
+/** 容器 id 的最终目标区:覆盖表优先,否则按声明 location(非侧边区一律 left)。 */
+function resolveViewContainerArea(containerId: string, location: string): ApplicationShell.Area {
+    const override = PLUGIN_VIEW_CONTAINER_AREA_OVERRIDES[containerId];
+    if (override) {
+        return override;
+    }
+    return ApplicationShell.isSideArea(location) ? location : 'left';
+}
+
+/**
+ * AXIO FIX:插件视图「改投容器」覆盖表(viewId → contributes.views 的**原始 key**)。
+ *
+ * 起因:同一个 vsix 装两个宿主,contributes 是两宿主共享的静态清单。
+ *  - VSCode 需要 axioProject.mainView 待在插件自建的 axio-project 活动栏容器里 ——
+ *    那是工程管理的唯一入口(webview 内的欢迎态"新建工程/打开工程"),也是 VSCode 侧
+ *    活动栏图标的来源(扩展容器 hideIfEmpty,容器里没有可见视图时图标会一起消失)。
+ *  - 本 IDE 需要它落在内建 explorer 容器里 —— @ax-ide/navigator 的 AxIdeExplorerViewContainer
+ *    按 partId 'plugin-view:axioProject.mainView' 抓到它,才做置顶(ensureMainViewFirst)、
+ *    无工程整块隐藏、强制展开、240px 最小高度这一整套。
+ *
+ * 清单里做不到"一个视图按宿主落不同容器"(同 id 声明两处会被两宿主各丢一份),所以改在
+ * 这里做:清单保持 VSCode 合法形态,IDE 侧把视图绑到别的容器。
+ * ★ value 用**清单原始 key**:内置容器写 'explorer';贡献容器写它的 id(不加
+ *   workbench.view.extension. 前缀),因为紧随其后的 BUILTIN 判断会统一决定加不加前缀,
+ *   这里写成带前缀的全名反而会被当成另一个贡献容器 id。
+ * ★ partId 只由 viewId 派生(toPluginViewWidgetIdentifier → 'plugin-view:<viewId>'),
+ *   与容器无关 —— 所以改投之后 AxIdeExplorerViewContainer 里的判定照旧命中,无需改它。
+ */
+const PLUGIN_VIEW_CONTAINER_OVERRIDES: Record<string, string> = {
+    'axioProject.mainView': 'explorer'
+};
+
+/** 改投后可能一个视图都不剩的**源容器**(需要清掉空壳,否则活动栏留一个点不开的图标)。
+ *  只登记确实被改投走的容器 —— initViewContainer 只被贡献容器调用,但显式白名单比
+ *  "零视图就清"更稳:后者会误杀将来某个合法的空容器。 */
+const PLUGIN_VIEW_CONTAINER_EMPTY_CLEANUP = new Set<string>([
+    'workbench.view.extension.axio-project'
+]);
+
 export type ViewDataProvider = (params: { state?: object, viewInfo: View }) => Promise<TreeViewWidget>;
 
 export interface ViewContainerInfo {
@@ -516,6 +576,10 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
     }
 
     registerView(viewContainerId: string, view: View): Disposable {
+        // AXIO FIX: 改投容器,见 PLUGIN_VIEW_CONTAINER_OVERRIDES 的模块头注释。
+        // ★ 必须在下面那个 BUILTIN 判断**之前** —— 目标是内置容器('explorer')时若先加前缀,
+        //   会绑到不存在的 'workbench.view.extension.explorer',视图永远不显示。
+        viewContainerId = PLUGIN_VIEW_CONTAINER_OVERRIDES[view.id] ?? viewContainerId;
         if (!PluginViewRegistry.BUILTIN_VIEW_CONTAINERS.has(viewContainerId)) {
             // if it's not a built-in view container, it must be a contributed view container, see https://github.com/eclipse-theia/theia/issues/13249
             viewContainerId = `workbench.view.extension.${viewContainerId}`;
@@ -804,7 +868,8 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         const containerWidget = await this.getOrCreateViewContainerWidget(containerId);
         if (!containerWidget.isAttached) {
             await this.shell.addWidget(containerWidget, {
-                area: ApplicationShell.isSideArea(location) ? location : 'left',
+                // AXIO FIX: 走覆盖表,见 PLUGIN_VIEW_CONTAINER_AREA_OVERRIDES 的模块头注释
+                area: resolveViewContainerArea(containerId, location),
                 rank: Number.MAX_SAFE_INTEGER
             });
         }
@@ -831,7 +896,8 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
             if (containerWidget.getTrackableWidgets().indexOf(widget) === -1) {
                 containerWidget.addWidget(widget, {
                     initiallyCollapsed: !!containerWidget.getParts().length,
-                    initiallyHidden: !this.isViewVisible(viewId)
+                    initiallyHidden: !this.isViewVisible(viewId),
+                    order: this.views.get(viewId)?.[1]?.order
                 });
             }
             this.registerWidgetPartEvents(widget, containerWidget);
@@ -905,6 +971,19 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
     }
 
     protected async initViewContainer(containerId: string): Promise<void> {
+        // AXIO FIX: 视图被 PLUGIN_VIEW_CONTAINER_OVERRIDES 改投走后,源容器可能一个视图都不剩。
+        //   下面"新建分支"虽然会在 0 个可见 part 时 dispose,但那时 widget 已经 shell.addWidget
+        //   进 dock 了(图标闪一下);而持久化布局恢复走的 else 分支根本不 dispose ——
+        //   结果是左侧留一个点不开的空图标。统一在入口处理:不创建,已恢复的直接销毁。
+        //   ★ 白名单式(只在 PLUGIN_VIEW_CONTAINER_EMPTY_CLEANUP 里登记过的容器上生效),
+        //     避免误杀将来某个合法的空容器。
+        if (PLUGIN_VIEW_CONTAINER_EMPTY_CLEANUP.has(containerId) && !this.getContainerViews(containerId).length) {
+            const stale = await this.getPluginViewContainer(containerId);
+            if (stale) {
+                stale.dispose();
+            }
+            return;
+        }
         let viewContainer = await this.getPluginViewContainer(containerId);
         if (!viewContainer) {
             viewContainer = await this.openViewContainer(containerId);
@@ -913,6 +992,23 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
                 viewContainer.dispose();
             }
         } else {
+            // AXIO FIX: 持久化布局恢复(SidePanelHandler.setLayoutData 按 items 顺序直接 addTab)
+            // 绕过 openViewContainer 的 area 计算,可能把声明 location=right 的容器恢复到 left。
+            // 此处校正:若实际区与声明 location 不一致,用 shell.addWidget 重新归位
+            // (与 PerspectiveServiceImpl.resetDefaultPerspective 的 relocate 模式一致,安全)。
+            // ★ 目标区必须走 resolveViewContainerArea(含 PLUGIN_VIEW_CONTAINER_AREA_OVERRIDES)——
+            //   直接读 declaredLocation 会用"清单里写的 left"把覆盖到右栏的容器又拉回左栏,与本表打架。
+            const containerData = this.viewContainers.get(containerId);
+            const declaredLocation = containerData?.location;
+            if (declaredLocation) {
+                const targetArea = resolveViewContainerArea(containerId, declaredLocation);
+                const currentArea = this.shell.getAreaFor(viewContainer);
+                if (currentArea && currentArea !== targetArea) {
+                    try {
+                        await this.shell.addWidget(viewContainer, { area: targetArea, rank: Number.MAX_SAFE_INTEGER });
+                    } catch { /* 归位失败不阻塞 init */ }
+                }
+            }
             await this.prepareViewContainer(this.toViewContainerId(viewContainer.options), viewContainer);
         }
     }

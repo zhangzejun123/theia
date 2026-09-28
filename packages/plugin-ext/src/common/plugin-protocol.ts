@@ -212,6 +212,7 @@ export interface PluginPackageView {
     name: string;
     when?: string;
     type?: string;
+    order?: number;
 }
 
 export interface PluginPackageViewWelcome {
@@ -872,6 +873,7 @@ export interface View {
     name: string;
     when?: string;
     type?: string;
+    order?: number;
 }
 
 /**
