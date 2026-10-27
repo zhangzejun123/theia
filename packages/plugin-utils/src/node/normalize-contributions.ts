@@ -853,7 +853,8 @@ export function readView(rawView: RawView): RawView {
         id: rawView.id,
         name: rawView.name,
         when: rawView.when,
-        type: rawView.type
+        type: rawView.type,
+        order: rawView.order
     };
 }
 

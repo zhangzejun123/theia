@@ -218,6 +218,7 @@ export interface PluginPackageView {
     name: string;
     when?: string;
     type?: string;
+    order?: number;
 }
 
 export interface PluginPackageViewWelcome {
@@ -225,6 +226,7 @@ export interface PluginPackageViewWelcome {
     contents: string;
     when?: string;
     enablement?: string;
+    order?: number;
 }
 
 export interface PluginPackageCommand {
